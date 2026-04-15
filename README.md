@@ -24,6 +24,7 @@ Docker를 활용하여 FastAPI와 MySQL 기반의 웹 서비스를 컨테이너 
 ---
 
 ## 📁 Project Structure
+```
 docker/
 ├── main.py
 ├── Dockerfile
@@ -32,7 +33,7 @@ docker/
 ├── .gitignore
 ├── README.md
 └── .env
-
+```
 
 ---
 
