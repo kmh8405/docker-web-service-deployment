@@ -9,6 +9,7 @@ Docker를 활용하여 FastAPI와 MySQL 기반의 웹 서비스를 컨테이너 
 * API Server: FastAPI
 * Database: MySQL
 * Inference Worker: LLM (llama.cpp)
+* Message Broker: Redis (Queue + Pub/Sub)
 * Container Management: Docker Compose
 
 ---
@@ -22,15 +23,22 @@ Docker를 활용하여 FastAPI와 MySQL 기반의 웹 서비스를 컨테이너 
 * Created a custom Docker image using Dockerfile
 * Orchestrated multiple containers using Docker Compose
 
----
-
 ### Day 2
 
 * Integrated MySQL with FastAPI using SQLAlchemy
 * Separated API and Worker services for better architecture
-* Introduced LLM inference worker using `llama-cpp-python`
+* Introduced LLM inference worker using llama-cpp-python
 * Structured the project for handling concurrency issues
-* Managed multiple services (api, db, worker) with Docker Compose
+
+### Day 3
+
+* Introduced Redis as a message broker
+* Implemented Queue-based task distribution (LPUSH / BRPOP)
+* Implemented Pub/Sub for real-time communication
+* Built streaming chat endpoint using StreamingResponse
+* Designed full pipeline:
+
+  FastAPI → Redis Queue → Worker → Redis Pub/Sub → FastAPI → Client
 
 ---
 
@@ -66,17 +74,18 @@ docker compose up -d --build
 ```
 
 * First run requires build
-* After that:
 
 ```bash
 docker compose up -d
 ```
 
-* Stop all containers:
+* Restart without rebuild
 
 ```bash
 docker compose down
 ```
+
+* Stop all containers
 
 ---
 
@@ -84,6 +93,14 @@ docker compose down
 
 * Health Check
   http://localhost:8000/health-check
+
+* Chat (Streaming)
+
+  ```bash
+  curl -N -X POST http://127.0.0.1:8000/chats \
+  -H "Content-Type: application/json" \
+  -d '{"user_input": "Python이 뭐야?"}'
+  ```
 
 ---
 
@@ -104,15 +121,11 @@ docker compose down
 bind: address already in use
 ```
 
-**Cause**
-
-* The specified port is already being used by another container or process
-
 **Solutions**
 
-* Stop existing containers (`docker compose down`)
-* Change the port number (e.g., 33061)
-* Remove port mapping if it is not required
+* Stop containers (`docker compose down`)
+* Change port
+* Remove port mapping if unnecessary
 
 ---
 
@@ -177,7 +190,50 @@ api:
 
 ---
 
-### 4. MySQL Workbench reconnect loop
+### 3. Redis / API Internal Server Error
+
+**Symptom**
+
+* `Internal Server Error` occurs when calling `/chats`
+
+**Cause**
+
+* Typo in Redis Pub/Sub initialization
+
+```python
+pubusb()  ❌
+pubsub()  ✅
+```
+
+---
+
+### 4. Infinite loading (no response from /chats)
+
+**Symptom**
+
+* Request hangs with no response (infinite loading)
+
+**Cause**
+
+* Token parsing error in worker
+
+```python
+chunk["choices"]["0"]  ❌
+chunk["choices"][0]    ✅
+```
+
+**Additional Check**
+
+* Verify Redis queue status
+
+```bash
+docker exec -it docker-redis-1 redis-cli
+LRANGE queue 0 -1
+```
+
+---
+
+### 5. MySQL Workbench reconnect loop
 
 **Symptom**
 
@@ -202,48 +258,13 @@ api:
 
 ## 📌 Notes
 
-* This project evolves from a single-container setup to a multi-container architecture
-* API and Worker are separated to handle concurrency issues in model inference
-* The `--reload` option is used in development for automatic server restart
-* In Docker Compose, service names act as hostnames (e.g., `db`)
-* `depends_on` does not guarantee that the database is ready to accept connections
-
-### Docker & Build
-
-* Code changes require rebuilding the image:
-
-```bash
-docker compose up -d --build
-```
-
-* `docker compose down` removes containers
-* `docker compose up -d` restarts without rebuild
-
-### Volume
-
-* `./api:/app`
-  → Local code is mounted into the container
-
-* `local_db:/var/lib/mysql`
-  → MySQL data is persisted
-
-### Model Handling
-
-* Model files (e.g., `.gguf`) are excluded from Docker build using `.dockerignore`
-* Models are mounted via volume instead of being included in the image
-* This reduces image size and speeds up build time
-
-### Database Connection
-
-* Use `db` as hostname inside Docker network (not `localhost`)
-* API may attempt connection before DB is ready
-
-### Error Types
-
-* OperationalError
-  → DB connection failure
-
-* ProgrammingError
-  → Query or schema issue
+* API and Worker are separated to prevent concurrency issues
+* Redis is used for:
+  * Queue (task distribution)
+  * Pub/Sub (result delivery)
+* LLM inference is handled by Worker to avoid race conditions
+* Docker Compose service names act as internal hostnames (`db`, `redis`)
+* Volume is used to persist MySQL data
+* `--reload` is for development only (auto-restart on code change)
 
 ---
