@@ -62,6 +62,8 @@ docker/
 ├── api/
 │   ├── main.py
 │   ├── connection.py
+│   ├── connection_async.py
+│   ├── models.py
 │   ├── Dockerfile
 │   ├── requirements.txt
 │
