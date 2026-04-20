@@ -40,6 +40,19 @@ Docker를 활용하여 FastAPI와 MySQL 기반의 웹 서비스를 컨테이너 
 
   FastAPI → Redis Queue → Worker → Redis Pub/Sub → FastAPI → Client
 
+### Day 4
+
+* Introduced async database handling using SQLAlchemy (aiomysql)
+* Implemented Conversation & Message data model (1:N relationship)
+* Built conversation-based chat system with persistent history
+* Added APIs:
+  * Create conversation
+  * Retrieve messages
+  * Send message with context
+* Integrated full conversation context into LLM inference
+* Stored assistant responses in DB after streaming completes
+* Improved worker robustness with JSON parsing error handling
+* Refactored configuration using environment variables
 ---
 
 ## 📁 Project Structure
@@ -100,6 +113,23 @@ docker compose down
   curl -N -X POST http://127.0.0.1:8000/chats \
   -H "Content-Type: application/json" \
   -d '{"user_input": "Python이 뭐야?"}'
+  ```
+
+  * Create Conversation
+
+  ```bash
+  POST /conversations
+  ```
+
+  * Get Messages
+
+  ```bash
+  GET /conversations/{conversation_id}/messages
+  ```
+
+  * Send Message (Streaming)
+  ```bash
+  POST /conversations/{conversation_id}/messages
   ```
 
 ---
@@ -256,15 +286,74 @@ LRANGE queue 0 -1
 
 ---
 
+### 6. MySQL Access Denied (Docker Internal Network)
+
+**Error**
+
+`Access denied for user 'root'@'172.x.x.x'`
+
+**Cause**
+
+* Docker containers communicate via internal network (172.x.x.x)
+* MySQL treats this as external access
+* Root user not allowed for remote connections
+* Additionally, API container did not have required environment variables
+
+**Key Problem**
+
+* `MYSQL_ROOT_PASSWORD` was not set inside API container
+* DB authentication failed due to missing credentials
+
+**Solution**
+
+1. Add environment variables to API container
+
+```yaml
+api:
+  environment:
+    MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    MYSQL_DATABASE: ${MYSQL_DATABASE}
+    MYSQL_HOST: ${MYSQL_HOST}
+    MYSQL_PORT: ${MYSQL_PORT}
+```
+
+2. Rebuild containers
+
+```bash
+docker compose down -v
+docker compose up -d --build
+```
+
+3. Verify environment variables
+
+```bash
+docker exec -it docker-api-1 bash
+echo $MYSQL_ROOT_PASSWORD
+```
+
+4. Run table creation again
+
+```python
+from models import Base
+from connection import engine
+Base.metadata.create_all(engine)
+```
+
+---
+
 ## 📌 Notes
 
-* API and Worker are separated to prevent concurrency issues
+* API and Worker are separated to avoid concurrency issues in LLM inference
 * Redis is used for:
-  * Queue (task distribution)
-  * Pub/Sub (result delivery)
-* LLM inference is handled by Worker to avoid race conditions
+  * Queue → task delivery (FastAPI → Worker)
+  * Pub/Sub → result streaming (Worker → FastAPI)
+* LLM runs only in Worker to prevent race conditions
+* Conversation history is stored in MySQL and passed to the model as context
+* Async DB (`aiomysql`) is used for non-blocking database operations
 * Docker Compose service names act as internal hostnames (`db`, `redis`)
 * Volume is used to persist MySQL data
-* `--reload` is for development only (auto-restart on code change)
+* `--reload` is for development only
+
+
 
 ---
